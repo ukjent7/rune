@@ -228,6 +228,8 @@ fn build_parts<S, T: 'static>(
     let ConfiguredOverlay {
         spec, options, on_key, on_created, poll, compositor, setup, runtime, macos_level,
         animate_reveal, release_after,
+        #[cfg(target_os = "windows")]
+        cpu_only,
     } = configured;
     let shared_core = Arc::new(SharedCore::default());
     let shared = Arc::new(Shared { core: shared_core.clone(), updates: Default::default() });
@@ -242,7 +244,8 @@ fn build_parts<S, T: 'static>(
     }));
     rt.set_live_visible(false);
     let at = Placement { size: spec.size, edge: spec.edge, margin: spec.margin, align: spec.align, inset: spec.inset };
-    let core = OverlayCore::new(
+    #[allow(unused_mut)]
+    let mut core = OverlayCore::new(
         rt.core_mut(),
         shared_core,
         spec.name,
@@ -254,6 +257,8 @@ fn build_parts<S, T: 'static>(
         animate_reveal,
         release_after,
     );
+    #[cfg(target_os = "windows")]
+    if cpu_only { core.enable_cpu(rt.core_mut()); }
     let typed = TypedOverlayApp { rt, compositor, setup, shared: shared.clone() };
     (core, typed, OverlayHandle { shared })
 }

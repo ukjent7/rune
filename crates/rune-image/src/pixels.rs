@@ -93,9 +93,21 @@ impl Pixels {
     /// again. This is the streaming path: no decoding or mip generation, and a same-size
     /// frame reuses its atlas slot.
     pub fn set(&self, width: u32, height: u32, rgba: Vec<u8>) {
+        self.publish(width, height, rgba, false);
+    }
+
+    /// Like `set`, but leave the frame and its subscribers alone when all pixels match.
+    pub fn set_if_changed(&self, width: u32, height: u32, rgba: Vec<u8>) -> bool {
+        self.publish(width, height, rgba, true)
+    }
+
+    fn publish(&self, width: u32, height: u32, rgba: Vec<u8>, compare: bool) -> bool {
         assert_eq!(Some(rgba.len()), (width as usize).checked_mul(height as usize).and_then(|n| n.checked_mul(4)), "rgba must hold width * height pixels");
         {
             let mut frame = self.frame.lock().unwrap();
+            if compare && frame.mips.is_none() && frame.width == width && frame.height == height && frame.rgba == rgba {
+                return false;
+            }
             frame.width = width;
             frame.height = height;
             frame.rgba = rgba;
@@ -103,6 +115,7 @@ impl Pixels {
             frame.mips = None;
         }
         self.source.notify();
+        true
     }
 
     pub(crate) fn set_mips(&self, mips: Arc<crate::Decoded>) {

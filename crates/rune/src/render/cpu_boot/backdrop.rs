@@ -5,6 +5,7 @@
 //! `Rgba16Float` holds it, then the composite (backdrop_composite.wgsl) inside the record's rounded
 //! rect and clip. Only the record's region is blurred, as on the GPU.
 
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use super::raster::{Exec, f16};
@@ -113,6 +114,17 @@ pub(super) struct Blurred {
     place: [f32; 4],
 }
 
+/// The window pixels the blur reads, one beyond `rec`'s region on every side (a bilinear tap
+/// at the region's edge reaches one pixel past it), clamped to the viewport.
+fn source_bounds(rec: &Record, viewport: (u32, u32)) -> [u32; 4] {
+    [
+        (rec.region[0].floor() as u32).saturating_sub(1),
+        (rec.region[1].floor() as u32).saturating_sub(1),
+        ((rec.region[2].ceil() as u32) + 1).min(viewport.0),
+        ((rec.region[3].ceil() as u32) + 1).min(viewport.1),
+    ]
+}
+
 /// Blurs the window's pixels under `rec`: `window(x, y)` reads pixel `(x, y)` as the target
 /// holds it, R, G, B, A in 0..=1.
 pub(super) fn blur(rec: &Record, viewport: (u32, u32), half: super::HalfRounding, exec: &dyn Exec, window: impl Fn(u32, u32) -> [f32; 4] + Sync) -> Blurred {
@@ -127,8 +139,7 @@ pub(super) fn blur(rec: &Record, viewport: (u32, u32), half: super::HalfRounding
     let window_map = [extent[0] / v[0], extent[1] / v[1], rec.origin[0] / v[0], rec.origin[1] / v[1]];
     // The region's pixels as floats, once: the first pass reads each a few dozen times. A
     // bilinear read at the region's edge reaches one pixel past it.
-    let (cx0, cy0) = ((rec.region[0].floor() as u32).saturating_sub(1), (rec.region[1].floor() as u32).saturating_sub(1));
-    let (cx1, cy1) = (((rec.region[2].ceil() as u32) + 1).min(viewport.0), ((rec.region[3].ceil() as u32) + 1).min(viewport.1));
+    let [cx0, cy0, cx1, cy1] = source_bounds(rec, viewport);
     let cw = cx1 - cx0;
     let cache: Vec<[f32; 4]> = (cy0..cy1).flat_map(|y| (cx0..cx1).map(move |x| (x, y))).map(|(x, y)| window(x, y)).collect();
     let window = |x: u32, y: u32| if x >= cx0 && x < cx1 && y >= cy0 && y < cy1 { cache[((y - cy0) * cw + (x - cx0)) as usize] } else { window(x, y) };
@@ -216,6 +227,62 @@ pub(super) fn blur(rec: &Record, viewport: (u32, u32), half: super::HalfRounding
         });
         coarse = Some(out);
     }    Blurred { up: coarse.unwrap_or_else(|| down.swap_remove(0)), place: [rec.origin[0], rec.origin[1], extent[0], extent[1]] }
+}
+
+/// One-slot backdrop blur cache: keeps the packed source bytes of a single blur and its
+/// result, hit only when the frame has exactly one blur record and every input byte still
+/// matches. Capped at 2 MiB of packed input plus level-0 output.
+#[derive(Default)]
+pub(super) struct Cache(Option<Cached>);
+
+struct Cached {
+    rec: Record,
+    viewport: (u32, u32),
+    half: super::HalfRounding,
+    bytes: Vec<u8>,
+    blurred: Arc<Blurred>,
+}
+
+impl Cache {
+    pub(super) fn clear(&mut self) {
+        self.0 = None;
+    }
+
+    /// `blur` on `bgra` (window pixels, `stride` bytes a row), or the kept result when the
+    /// record, viewport, half rounding and every source byte match.
+    pub(super) fn blur(&mut self, rec: &Record, viewport: (u32, u32), half: super::HalfRounding,
+        exec: &dyn Exec, bgra: &[u8], stride: usize) -> (Arc<Blurred>, bool) {
+        let [x0, y0, x1, y1] = source_bounds(rec, viewport).map(|x| x as usize);
+        let width_bytes = (x1 - x0) * 4;
+        let rows = || (y0..y1).map(|y| &bgra[y * stride + x0 * 4..y * stride + x1 * 4]);
+        let input_bytes = width_bytes * (y1 - y0);
+        let output_bytes = u64::from(rec.size[0]) * u64::from(rec.size[1]) * 16;
+        let fits = viewport.0 <= 4096 && viewport.1 <= 4096 && width_bytes > 0
+            && input_bytes as u64 + output_bytes <= 2 * 1024 * 1024;
+        let source_pixel = |x: u32, y: u32| {
+            let at = y as usize * stride + x as usize * 4;
+            [bgra[at + 2] as f32 / 255.0, bgra[at + 1] as f32 / 255.0, bgra[at] as f32 / 255.0,
+                bgra[at + 3] as f32 / 255.0]
+        };
+        if fits
+            && let Some(cached) = &self.0
+            && cached.rec == *rec
+            && cached.viewport == viewport
+            && cached.half == half
+            && cached.bytes.len() == input_bytes
+            && rows().zip(cached.bytes.chunks_exact(width_bytes)).all(|(a, b)| a == b)
+        {
+            return (cached.blurred.clone(), true);
+        }
+        self.clear();
+        let blurred = Arc::new(blur(rec, viewport, half, exec, source_pixel));
+        if fits {
+            let mut bytes = Vec::with_capacity(input_bytes);
+            for row in rows() { bytes.extend_from_slice(row); }
+            self.0 = Some(Cached { rec: *rec, viewport, half, bytes, blurred: blurred.clone() });
+        }
+        (blurred, false)
+    }
 }
 
 /// `fs_down`'s 13 taps, `s` sampling at a texel offset, summed in its order.

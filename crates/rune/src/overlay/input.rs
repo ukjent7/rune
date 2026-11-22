@@ -31,7 +31,7 @@ impl OverlayCore {
             layer.set_cursor(if active { want } else { crate::el::Cursor::Default });
             return;
         }
-        let (Some(Live { backing: Backing::Window(window), .. }), Some(cursor)) = (self.surface.live(), &mut self.cursor) else { return };
+        let (Some(Backing::Window(window)), Some(cursor)) = (self.surface.backing(), &mut self.cursor) else { return };
         cursor.apply(window, want, active);
         #[cfg(target_os = "macos")]
         if let Some(panel) = &self.panel { panel.set_cursor(active.then_some(want)); }
@@ -436,6 +436,11 @@ impl OverlayCore {
             if self.at.size != old_size {
                 self.resized(app, event_loop);
             } else {
+                #[cfg(target_os = "windows")]
+                if self.cpu.is_some() && let Some(Backing::Window(w)) = self.surface.parked() {
+                    let w = w.clone();
+                    self.place_window(app.rt_mut(), event_loop, &w);
+                }
                 match self.surface.live_mut().map(|l| &mut l.backing) {
                     Some(Backing::Window(w)) => {
                         let w = w.clone();

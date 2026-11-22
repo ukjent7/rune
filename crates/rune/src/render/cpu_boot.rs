@@ -269,6 +269,8 @@ pub struct Report {
     pub slowest_tile_ns: u64,
     /// Taking backdrop blurs, on the calling thread between phases.
     pub blur_ns: u64,
+    /// Backdrop results reused from the cache.
+    pub blur_cache_hits: usize,
 }
 
 /// Paints `scene` into `target` on `threads` threads (the calling one among them), or says why
@@ -280,7 +282,7 @@ pub fn paint(scene: &Scene<'_>, target: &mut Target<'_>, threads: usize) -> Resu
     let bins = bin::Bins::of(scene);
     let binned = crate::time::now();
     let tiles: Vec<u32> = (0..bins.tile_count() as u32).collect();
-    let mut report = raster::run(scene, &bins, target, &tiles, &raster::Spawn(threads.max(1)), &raster::Spawn(threads.max(1)));
+    let mut report = raster::run(scene, &bins, target, &tiles, &raster::Spawn(threads.max(1)), &raster::Spawn(threads.max(1)), None);
     let done = crate::time::now();
     report.bin_ns = ns(binned - start);
     report.raster_ns = ns(done - binned);

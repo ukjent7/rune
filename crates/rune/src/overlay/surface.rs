@@ -371,7 +371,10 @@ impl OverlayCore {
         #[cfg(target_os = "macos")]
         self.panel.take();
         #[cfg(target_os = "windows")]
-        self.native.take();
+        {
+            if let Some(cpu) = &mut self.cpu { cpu.detach(); }
+            self.native.take();
+        }
         #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
         self.x11.take();
         drop(backing);

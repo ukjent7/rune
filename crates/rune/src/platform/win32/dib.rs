@@ -76,6 +76,20 @@ impl Dib {
         unsafe { std::slice::from_raw_parts_mut(self.bits, self.width as usize * self.height as usize * 4) }
     }
 
+    pub(crate) fn present_layered(&self, hwnd: HWND, size: (u32, u32), alpha: u8) -> std::io::Result<()> {
+        use windows_sys::Win32::Foundation::{POINT, SIZE};
+        use windows_sys::Win32::Graphics::Gdi::{AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ULW_ALPHA, UpdateLayeredWindow};
+        let size = SIZE { cx: size.0 as i32, cy: size.1 as i32 };
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: alpha, AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        // Keep the window's position; the source is the retained premultiplied BGRA DIB.
+        let ok = unsafe { UpdateLayeredWindow(hwnd, std::ptr::null_mut(), std::ptr::null(), &size,
+            self.dc, &POINT { x: 0, y: 0 }, 0, &blend, ULW_ALPHA) };
+        if ok == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+    }
+
     /// Writes every page of the first `rows` rows once, so the first frame's paint doesn't take a
     /// fault per 4 KiB. Meant for a worker while the frame is laid out (`Prefault`).
     fn touch(&self, rows: u32) {

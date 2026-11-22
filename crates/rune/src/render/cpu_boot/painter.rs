@@ -37,6 +37,8 @@ pub struct CpuPainter {
     resets: u64,
     /// The last frame's scene-wide switches (`Scene::flags`), from a frame the CPU could draw.
     flags: Option<super::Flags>,
+    /// The last blur's packed source and result, reused while they still match.
+    backdrop: Option<super::backdrop::Cache>,
     /// Scratch for `recoloured`: the instances that changed, and which tiles they mark.
     changed: Vec<u32>,
     marked: Vec<bool>,
@@ -68,7 +70,7 @@ impl CpuPainter {
     /// A painter running on `threads` threads, the caller among them (the others are made now,
     /// and park between frames).
     pub fn new(threads: usize) -> CpuPainter {
-        CpuPainter { pool: Pool::new(threads), hashes: Vec::new(), next: Vec::new(), each: Vec::new(), size: (0, 0), stride: 0, dirty: Vec::new(), prev: None, resets: 0, flags: None, changed: Vec::new(), marked: Vec::new() }
+        CpuPainter { pool: Pool::new(threads), hashes: Vec::new(), next: Vec::new(), each: Vec::new(), size: (0, 0), stride: 0, dirty: Vec::new(), prev: None, resets: 0, flags: None, changed: Vec::new(), marked: Vec::new(), backdrop: None }
     }
 
     /// The buffer's pixels are no longer the last frame's (a new buffer): the next frame paints
@@ -78,6 +80,18 @@ impl CpuPainter {
         self.hashes.clear();
         self.prev = None;
         self.flags = None;
+        self.clear_backdrop_cache();
+    }
+
+    /// Drops the cached backdrop blur's packed source and result (`forget` calls it too).
+    pub(crate) fn clear_backdrop_cache(&mut self) {
+        if let Some(c) = &mut self.backdrop { c.clear(); }
+    }
+
+    /// Reuses a single unchanged backdrop blur across frames.
+    pub(crate) fn with_backdrop_cache(mut self) -> Self {
+        self.backdrop = Some(super::backdrop::Cache::default());
+        self
     }
 
     /// Fills the masks the text system queued (`fill_masks`) on this painter's threads.
@@ -151,7 +165,7 @@ impl CpuPainter {
         self.resets = scene.atlas_resets;
         let hashed = crate::time::now();
         let extra = (self.dirty.len() / TILES_PER_THREAD).min(self.pool.threads() - 1);
-        let mut report = raster::run(scene, &bins, target, &self.dirty, &Threads { pool: &self.pool, extra }, &Threads { pool: &self.pool, extra: self.pool.threads() - 1 });
+        let mut report = raster::run(scene, &bins, target, &self.dirty, &Threads { pool: &self.pool, extra }, &Threads { pool: &self.pool, extra: self.pool.threads() - 1 }, self.backdrop.as_mut());
         let done = crate::time::now();
         report.bin_ns = super::ns(binned - start);
         report.raster_ns = super::ns(done - hashed);
@@ -222,7 +236,7 @@ impl CpuPainter {
         }
         let hashed = crate::time::now();
         let extra = (self.dirty.len() / TILES_PER_THREAD).min(self.pool.threads() - 1);
-        let mut report = if self.dirty.is_empty() { Report::default() } else { raster::run(scene, bins, target, &self.dirty, &Threads { pool: &self.pool, extra }, &Threads { pool: &self.pool, extra: self.pool.threads() - 1 }) };
+        let mut report = if self.dirty.is_empty() { Report::default() } else { raster::run(scene, bins, target, &self.dirty, &Threads { pool: &self.pool, extra }, &Threads { pool: &self.pool, extra: self.pool.threads() - 1 }, self.backdrop.as_mut()) };
         let done = crate::time::now();
         report.raster_ns = super::ns(done - hashed);
         report.total_ns = super::ns(done - start);

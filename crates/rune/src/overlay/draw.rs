@@ -429,6 +429,11 @@ impl OverlayCore {
             self.drain_hidden(app);
             return false;
         }
+        #[cfg(target_os = "windows")]
+        if self.cpu.is_some() {
+            if self.presence.shown() { self.draw_cpu(app); }
+            return false;
+        }
         let more = self.draw_frame(app, false);
         self.open_popup(app);
         more

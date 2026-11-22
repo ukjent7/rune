@@ -10,6 +10,11 @@ impl OverlayCore {
         app.rt_mut().set_system_dark(crate::platform::preferences::dark().unwrap_or(self.dark));
         self.accent_changed(app.rt_mut(), crate::system_accent());
         self.scroll_bars_changed(app.rt_mut(), crate::platform::scroll_bars::current());
+        #[cfg(target_os = "windows")]
+        if self.cpu.is_some() {
+            self.show_cpu(app, event_loop, fade);
+            return;
+        }
         // Shown again mid fade-out: the window is still up with current pixels, and its motion
         // carries on rather than settling.
         let fading = self.presence.fading();
@@ -54,6 +59,16 @@ impl OverlayCore {
     /// only its window at startup and parks it; its surface, and the GPU device for the first,
     /// wait for the show.
     pub(super) fn prepare(&mut self, app: &mut dyn OverlayApp, event_loop: &ActiveEventLoop, showing: bool) {
+        #[cfg(target_os = "windows")]
+        if self.cpu.is_some() {
+            if self.surface.backing().is_none() {
+                self.resolve_size(event_loop);
+                if self.window(app, event_loop).is_some() {
+                    self.ready(app, showing);
+                }
+            }
+            return;
+        }
         if self.surface.live().is_some() { return; }
         let surface = showing || !self.defers_gpu();
         let wayland = crate::window::is_wayland(event_loop);
@@ -105,7 +120,11 @@ impl OverlayCore {
         if !self.animate_reveal { app.rt_mut().settle_all(); }
         self.dirty = true;
         self.idle = true;
-        if self.options.prewarm && !(showing && self.defers_gpu()) { self.warm(app); }
+        #[cfg(target_os = "windows")]
+        let cpu = self.cpu.is_some();
+        #[cfg(not(target_os = "windows"))]
+        let cpu = false;
+        if !cpu && self.options.prewarm && !(showing && self.defers_gpu()) { self.warm(app); }
         if !self.surface.announced() && let Some(created) = &mut self.on_created {
             self.surface.announce();
             let (window_number, capabilities) = *self.shared.native.lock().unwrap();
@@ -158,7 +177,11 @@ impl OverlayCore {
         self.carry_out(app, effects);
         #[cfg(target_os = "windows")]
         if let Presence::FadingOut { until, length, .. } = self.presence && let Some(native) = &self.native {
-            native.fade(fade_alpha(until, length, now));
+            let alpha = fade_alpha(until, length, now);
+            native.fade(alpha, self.cpu.is_some());
+            if let Some(cpu) = &mut self.cpu && let Some(Backing::Window(window)) = self.surface.parked() {
+                cpu.fade(window, alpha);
+            }
         }
     }
 
@@ -193,9 +216,11 @@ impl OverlayCore {
         app.popup_cancel(&mut self.popup);
         app.rt_mut().cancel_pointer();
         self.apply_cursor(app.rt());
+        #[cfg(target_os = "windows")]
+        if let Some(cpu) = &mut self.cpu { cpu.clear_backdrop_cache(); }
         self.hidden_input(app);
-        let Some(live) = self.surface.live() else { return };
-        match &live.backing {
+        let Some(backing) = self.surface.backing() else { return };
+        match backing {
             Backing::Window(window) => {
                 if self.options.keys == KeyPolicy::OnDemand {
                     crate::platform::ime::cancel(window);
@@ -207,7 +232,7 @@ impl OverlayCore {
                 {
                     let _ = (window, fade);
                     if let Some(native) = &mut self.native {
-                        if self.presence.fading() { native.fade(255) } else { native.hide() }
+                        if self.presence.fading() { native.fade(255, self.cpu.is_some()) } else { native.hide() }
                     }
                 }
                 #[cfg(target_os = "macos")]
@@ -284,7 +309,7 @@ impl OverlayCore {
             use winit::platform::windows::WindowAttributesExtWindows;
             // DirectComposition draws the overlay (`Gpu::instance`); without a redirection bitmap
             // nothing under it paints the window black.
-            attrs = attrs.with_skip_taskbar(true).with_undecorated_shadow(false).with_no_redirection_bitmap(true);
+            attrs = attrs.with_skip_taskbar(true).with_undecorated_shadow(false).with_no_redirection_bitmap(self.cpu.is_none());
         }
         #[cfg(target_os = "macos")]
         {
@@ -332,7 +357,10 @@ impl OverlayCore {
             #[cfg(target_os = "windows")]
             {
                 let wake = self.shared.wake.lock().unwrap().clone();
-                match crate::platform::win32::OverlayWindow::new(&window, self.interactive, &self.options, wake) {
+                if let Some(cpu) = &mut self.cpu {
+                    cpu.a11y = wake.clone().and_then(|wake| crate::a11y::Adapter::new(&window, wake));
+                }
+                match crate::platform::win32::OverlayWindow::new(&window, self.interactive, &self.options, wake, self.cpu.is_some()) {
                     Ok(native) => self.native = Some(native),
                     Err(error) => {
                         self.fail(error);
