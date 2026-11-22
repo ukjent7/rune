@@ -154,6 +154,7 @@ impl OverlayCore {
 fn scene(rt: &RuntimeCore, size: (u32, u32), compositor: bool) -> Scene<'_> {
     Scene::new(&rt.instances, &rt.text.atlas, &rt.images, size, [0.0; 4])
         .srgb_blend(rt.srgb_blend())
+        .fade_stops(rt.fade_stops())
         .native_surfaces(!rt.surfaces.is_empty())
         .compositor(compositor)
         .font_smoothing(rt.font_smoothing())
