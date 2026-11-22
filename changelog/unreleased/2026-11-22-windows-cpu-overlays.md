@@ -1,1 +1,1 @@
-- Windows overlays can opt into CPU painting and per-pixel layered-window presentation without changing other windows' GPU rendering. The CPU painter can reuse an unchanged backdrop blur, and streaming pixels can skip publishing identical frames.
+- Windows overlays can opt into CPU painting and per-pixel layered-window presentation without changing other windows' GPU rendering. The CPU painter can reuse an unchanged backdrop blur.

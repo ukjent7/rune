@@ -1,23 +1,6 @@
 use super::*;
 
 #[test]
-fn identical_stream_frame_does_not_restage_the_atlas() {
-    let stream = Pixels::new();
-    let mut atlas = ImageAtlas::default();
-    assert!(stream.set_if_changed(2, 1, vec![255; 8]));
-    atlas.place(&stream, [2.0, 1.0]).unwrap();
-    atlas.pages[0].dirty = None;
-
-    assert!(!stream.set_if_changed(2, 1, vec![255; 8]));
-    atlas.place(&stream, [2.0, 1.0]).unwrap();
-    assert!(atlas.pages[0].dirty.is_none());
-
-    assert!(stream.set_if_changed(2, 1, vec![127; 8]));
-    atlas.place(&stream, [2.0, 1.0]).unwrap();
-    assert!(atlas.pages[0].dirty.is_some());
-}
-
-#[test]
 #[ignore = "manual staging benchmark; reports measurements, not a timing threshold"]
 fn image_staging_costs() {
     use std::hint::black_box;
