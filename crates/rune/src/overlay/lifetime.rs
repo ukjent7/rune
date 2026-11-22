@@ -216,8 +216,6 @@ impl OverlayCore {
         app.popup_cancel(&mut self.popup);
         app.rt_mut().cancel_pointer();
         self.apply_cursor(app.rt());
-        #[cfg(target_os = "windows")]
-        if let Some(cpu) = &mut self.cpu { cpu.clear_backdrop_cache(); }
         self.hidden_input(app);
         let Some(backing) = self.surface.backing() else { return };
         match backing {

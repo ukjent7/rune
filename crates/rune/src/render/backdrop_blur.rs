@@ -49,7 +49,7 @@ const _: () = {
 };
 
 /// Planned pyramid geometry for one `KIND_BACKDROP_BLUR` record, shared with `cpu_boot::backdrop`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(in crate::render) struct Plan {
     /// The up chain starts at this level (at least 1), mixing `share` of it with the finer level.
     pub levels: usize,

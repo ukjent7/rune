@@ -24,20 +24,14 @@ use crate::render::{Instance, Kind};
 const TILE_PX: usize = (TILE_W * TILE_H) as usize;
 
 /// Paints 	iles on xec's threads; backdrop blurs, taken between phases, go on wide's.
-pub(super) fn run(scene: &Scene<'_>, bins: &Bins, target: &mut Target<'_>, tiles: &[u32], exec: &dyn Exec, wide: &dyn Exec,
-    mut cache: Option<&mut backdrop::Cache>) -> Report {
+pub(super) fn run(scene: &Scene<'_>, bins: &Bins, target: &mut Target<'_>, tiles: &[u32], exec: &dyn Exec, wide: &dyn Exec) -> Report {
     let surface = Surface { base: target.pixels.as_mut_ptr(), len: target.pixels.len(), stride: target.stride };
     let clear = scene.clear.map(|c| c.clamp(0.0, 1.0) * 255.0);
     let clear = [q(clear[2]), q(clear[1]), q(clear[0]), q(clear[3])];
     let mut report = Report { threads: exec.threads(), ..Report::default() };
     if tiles.is_empty() { return report; }
-    // The one-slot cache only covers a frame with exactly one blur record.
-    if bins.blurs.len() != 1 {
-        if let Some(c) = cache.as_deref_mut() { c.clear(); }
-        cache = None;
-    }
     // Each record's blur, or None when no tile painted this frame shows it.
-    let mut blurred: Vec<Option<std::sync::Arc<backdrop::Blurred>>> = Vec::with_capacity(bins.blurs.len());
+    let mut blurred: Vec<Option<backdrop::Blurred>> = Vec::with_capacity(bins.blurs.len());
     // A backdrop blur splits the frame: what's under it is painted everywhere first.
     let cuts: Vec<u32> = bins.blurs.iter().map(|(n, _)| *n).chain([u32::MAX]).collect();
     let mut from = 0;
@@ -105,17 +99,10 @@ pub(super) fn run(scene: &Scene<'_>, bins: &Bins, target: &mut Target<'_>, tiles
                 ((tx * TILE_W) as i32) < b[2] && (((tx + 1) * TILE_W) as i32) > b[0] && ((ty * TILE_H) as i32) < b[3] && (((ty + 1) * TILE_H) as i32) > b[1]
             });
             let began = crate::time::now();
-            blurred.push(shown.then(|| {
-                let (b, hit) = match cache.as_deref_mut() {
-                    Some(c) => c.blur(rec, scene.size, scene.half, wide, px, stride),
-                    None => (std::sync::Arc::new(backdrop::blur(rec, scene.size, scene.half, wide, |x, y| {
-                        let at = y as usize * stride + x as usize * 4;
-                        [px[at + 2] as f32 / 255.0, px[at + 1] as f32 / 255.0, px[at] as f32 / 255.0, px[at + 3] as f32 / 255.0]
-                    })), false),
-                };
-                report.blur_cache_hits += hit as usize;
-                b
-            }));
+            blurred.push(shown.then(|| backdrop::blur(rec, scene.size, scene.half, wide, |x, y| {
+                let at = y as usize * stride + x as usize * 4;
+                [px[at + 2] as f32 / 255.0, px[at + 1] as f32 / 255.0, px[at] as f32 / 255.0, px[at + 3] as f32 / 255.0]
+            })));
             report.blur_ns += super::ns(began.elapsed());
         }
         from = until;
@@ -273,7 +260,7 @@ struct Painter<'p, 's> {
     breaks: Vec<u32>,
     segs: Vec<Segment>,
     /// The blurs of the frame's backdrop blur records painted so far, in order.
-    blurred: &'p [Option<std::sync::Arc<backdrop::Blurred>>],
+    blurred: &'p [Option<backdrop::Blurred>],
 }
 
 impl Painter<'_, '_> {

@@ -19,14 +19,9 @@ impl Presenter {
     pub(super) fn new() -> Self {
         let now = crate::time::now();
         Self {
-            a11y: None, painter: CpuPainter::new(2).with_backdrop_cache(), buffer: None, monitor: None,
+            a11y: None, painter: CpuPainter::new(2), buffer: None, monitor: None,
             period: TIMER_FRAME, refresh_check: now,
         }
-    }
-
-    /// Frees the cached blur payload: a hide no longer needs the blur it kept.
-    pub(super) fn clear_backdrop_cache(&mut self) {
-        self.painter.clear_backdrop_cache();
     }
 
     pub(super) fn detach(&mut self) {
