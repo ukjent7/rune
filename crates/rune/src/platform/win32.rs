@@ -376,10 +376,10 @@ pub(crate) struct OverlayWindow {
 }
 impl OverlayWindow {
     #[allow(unsafe_code)]
-    pub fn new(window: &winit::window::Window, interactive: bool, options: &OverlayOptions, wake: Option<crate::Waker>) -> Result<Self, String> {
+    pub fn new(window: &winit::window::Window, interactive: bool, options: &OverlayOptions, wake: Option<crate::Waker>, per_pixel: bool) -> Result<Self, String> {
         let hwnd = hwnd(window).ok_or("the overlay window has no Win32 handle")?;
         let mode = options.input.resolved(interactive);
-        overlay_styles(hwnd, mode, options.keys)?;
+        overlay_styles(hwnd, mode, options.keys, per_pixel)?;
         let exclusion = if options.exclude_from_capture {
             if set_hwnd_exclude_from_capture(hwnd, true) { OverlaySupport::Requested } else { OverlaySupport::Failed }
         } else { OverlaySupport::Unknown };
@@ -457,11 +457,11 @@ impl OverlayWindow {
     /// and hides overlays with Win32 calls alone: winit never sees either, and a winit
     /// visibility change would also reset these styles. Errs when Windows leaves it hidden.
     #[allow(unsafe_code)]
-    pub fn show(&mut self) -> Result<(), String> {
+    pub fn show(&mut self, per_pixel: bool) -> Result<(), String> {
         let hwnd = self.input.hwnd;
         // Opaque again, after any fade-out.
         self.input.fading.set(false);
-        overlay_styles(hwnd, self.input.input.get(), self.keys)?;
+        overlay_styles(hwnd, self.input.input.get(), self.keys, per_pixel)?;
         // SAFETY: Win32 calls on a live window owned by this thread.
         let visible = unsafe {
             ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -494,10 +494,10 @@ impl OverlayWindow {
     }
     /// Keeps the shown window up at `alpha` (255 opaque) while it fades out, taking no clicks.
     #[allow(unsafe_code)]
-    pub fn fade(&self, alpha: u8) {
+    pub fn fade(&self, alpha: u8, per_pixel: bool) {
         if !self.input.fading.replace(true) { self.observe_current(); }
         // SAFETY: a Win32 call on a live layered window owned by this thread.
-        unsafe { SetLayeredWindowAttributes(self.input.hwnd, 0, alpha, LWA_ALPHA); }
+        if !per_pixel { unsafe { SetLayeredWindowAttributes(self.input.hwnd, 0, alpha, LWA_ALPHA); } }
     }
     #[allow(unsafe_code)]
     pub fn hide(&mut self) {
@@ -533,7 +533,7 @@ impl Drop for OverlayWindow {
 /// attributes: without them it stays invisible however often it is shown (#510 in Hex).
 /// Opaque attributes leave the content's own alpha as the only transparency.
 #[allow(unsafe_code)]
-fn overlay_styles(hwnd: HWND, mode: OverlayInput, keys: crate::KeyPolicy) -> Result<(), String> {
+fn overlay_styles(hwnd: HWND, mode: OverlayInput, keys: crate::KeyPolicy, per_pixel: bool) -> Result<(), String> {
     let through = if mode == OverlayInput::All { 0 } else { WS_EX_TRANSPARENT };
     let no_activate = if crate::overlay::keys::can_take_keys(keys) { 0 } else { WS_EX_NOACTIVATE };
     // SAFETY: style changes on a live window owned by this thread.
@@ -541,7 +541,8 @@ fn overlay_styles(hwnd: HWND, mode: OverlayInput, keys: crate::KeyPolicy) -> Res
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         let next = style | WS_EX_LAYERED | no_activate | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | through;
         if next != style { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next as isize); }
-        if SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA) == 0 {
+        // UpdateLayeredWindow cannot follow SetLayeredWindowAttributes without resetting the style.
+        if !per_pixel && SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA) == 0 {
             return Err(format!("SetLayeredWindowAttributes failed: {}", last_error()));
         }
     }

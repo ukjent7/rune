@@ -69,7 +69,10 @@ impl OverlayCore {
     /// Answers what assistive clients asked of the overlay and sends its tree's changes. An
     /// action draws the frame that runs it.
     fn a11y_turn(&mut self, rt: &mut RuntimeCore) -> bool {
-        let Some(adapter) = self.surface.live_mut().and_then(|l| l.a11y.as_mut()) else { return false };
+        let adapter = self.surface.live_mut().and_then(|l| l.a11y.as_mut());
+        #[cfg(target_os = "windows")]
+        let adapter = adapter.or_else(|| self.cpu.as_mut().and_then(|cpu| cpu.a11y.as_mut()));
+        let Some(adapter) = adapter else { return false };
         let queued = adapter.service_core(rt, self.name);
         if queued {
             self.dirty = true;
@@ -408,7 +411,7 @@ impl AnyHost for OverlayHost {
             core.follow_pointer(app, _event_loop, desktop);
         }
         #[cfg(target_os = "windows")]
-        if core.surface.live().is_some() && let Some(point) = core.native.as_ref().and_then(|p| p.take_pointer()) && app.rt().pointer() != Some(point) {
+        if core.surface.backing().is_some() && let Some(point) = core.native.as_ref().and_then(|p| p.take_pointer()) && app.rt().pointer() != Some(point) {
             core.observe_pointer(app, point.0, point.1);
             if let Some(point) = crate::platform::win32::pointer_position() { core.follow_pointer(app, _event_loop, point); }
         }

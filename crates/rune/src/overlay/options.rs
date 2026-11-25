@@ -182,6 +182,8 @@ pub struct ConfiguredOverlay<T: 'static> {
     pub(crate) frame_latency: Option<u32>,
     pub(crate) animate_reveal: bool,
     pub(crate) release_after: Option<std::time::Duration>,
+    #[cfg(target_os = "windows")]
+    pub(crate) cpu_only: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -317,6 +319,10 @@ impl<T: 'static> ConfiguredOverlay<T> {
     /// first visible frame, such as a notification stack's first card entering. By default
     /// an unretained overlay shows settled, at its target.
     pub fn animate_reveal(mut self) -> Self { self.animate_reveal = true; self }
+    /// Use the CPU painter and per-pixel Win32 presentation for this overlay only.
+    /// GPU-only scene effects are reported as unavailable rather than falling back to a GPU.
+    #[cfg(target_os = "windows")]
+    pub fn cpu_only(mut self) -> Self { self.cpu_only = true; self }
     /// While hidden, the overlay holds no GPU surface, swapchain or renderer. Each show makes the
     /// surface, and each hide drops it. Away from macOS, the GPU device and renderer then wait
     /// five minutes for the next surface (a window's or overlay's) before they go, so an overlay
@@ -418,6 +424,8 @@ impl<T: 'static> OverlaySpec<T> {
             setup: None, runtime: crate::app::RuntimeConfig::default(), font_smoothing: None, macos_level: None,
             macos_color_space: crate::MacColorSpace::Srgb, window_backdrop: crate::WindowBackdrop::None,
             frame_latency: None, animate_reveal: false, release_after: None,
+            #[cfg(target_os = "windows")]
+            cpu_only: false,
         }
     }
 }

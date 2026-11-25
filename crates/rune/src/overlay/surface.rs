@@ -474,6 +474,7 @@ impl OverlayCore {
         self.panel.take();
         #[cfg(target_os = "windows")]
         {
+            if let Some(cpu) = &mut self.cpu { cpu.detach(); }
             self.native.take();
             self.backdrop_tracker = Default::default();
         }

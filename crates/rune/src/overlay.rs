@@ -65,6 +65,9 @@ mod any_host;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "overlay/app.rs"]
 mod app;
+#[cfg(target_os = "windows")]
+#[path = "overlay/cpu.rs"]
+mod cpu;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "overlay/draw.rs"]
 mod draw;
@@ -535,6 +538,8 @@ pub(in crate::overlay) struct OverlayCore {
     panel: Option<crate::platform::macos::Panel>,
     #[cfg(target_os = "windows")]
     native: Option<crate::platform::win32::OverlayWindow>,
+    #[cfg(target_os = "windows")]
+    cpu: Option<cpu::Presenter>,
     #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
     x11: Option<crate::platform::x11::overlay::InputWindow>,
     surface: surface::Surface,
@@ -648,6 +653,8 @@ impl OverlayCore {
             panel: None,
             #[cfg(target_os = "windows")]
             native: None,
+            #[cfg(target_os = "windows")]
+            cpu: None,
             #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
             x11: None,
             mods: Default::default(),
@@ -790,7 +797,7 @@ impl OverlayCore {
     }
 
     fn sync_live_origin(&mut self, rt: &mut RuntimeCore) {
-        let Some(Backing::Window(window)) = self.surface.live().map(|l| &l.backing) else { return };
+        let Some(Backing::Window(window)) = self.surface.backing() else { return };
         let window = window.clone();
         self.sync_origin(rt, &window);
     }
@@ -830,7 +837,7 @@ impl OverlayCore {
         {
             let _ = window;
             if let Some(native) = &mut self.native {
-                match native.show() {
+                match native.show(self.cpu.is_some()) {
                     Ok(()) => {
                         let recovered = self.shared.failure.lock().unwrap().take().is_some();
                         if recovered { self.set_availability_notify(app, Availability::Available); }

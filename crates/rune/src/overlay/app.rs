@@ -255,6 +255,8 @@ fn build_parts<S, T: 'static>(
     let ConfiguredOverlay {
         spec, options, on_key, on_created, on_availability, poll, compositor, setup, mut runtime, font_smoothing,
         macos_level, macos_color_space, window_backdrop, frame_latency, animate_reveal, release_after,
+        #[cfg(target_os = "windows")]
+        cpu_only,
     } = configured;
     let inherits_font_smoothing = font_smoothing.is_none();
     runtime.font_smoothing = font_smoothing.unwrap_or(app_font_smoothing);
@@ -272,6 +274,7 @@ fn build_parts<S, T: 'static>(
     }));
     rt.set_live_visible(false);
     let at = Placement { size: spec.size, edge: spec.edge, margin: spec.margin, align: spec.align, inset: spec.inset };
+    #[allow(unused_mut)]
     let mut core = OverlayCore::new(
         rt.core_mut(),
         shared_core,
@@ -287,6 +290,8 @@ fn build_parts<S, T: 'static>(
         release_after,
     );
     core.frame_latency = frame_latency;
+    #[cfg(target_os = "windows")]
+    if cpu_only { core.enable_cpu(rt.core_mut()); }
     let typed = TypedOverlayApp { rt, compositor, setup, on_availability, shared: shared.clone() };
     (core, typed, OverlayHandle { shared }, inherits_font_smoothing)
 }
